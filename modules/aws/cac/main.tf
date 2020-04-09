@@ -7,7 +7,11 @@
 
 locals {
   prefix         = var.prefix != "" ? "${var.prefix}-" : ""
-  startup_script = "cac-startup.sh"
+
+  startup_script       = "cac-startup.sh"
+  cam_script           = "cac-cam.py"
+  cam_credentials_file = "cam-cred.json"
+
   instance_info_list = flatten(
     [ for i in range(length(var.zone_list)):
       [ for j in range(var.instance_count_list[i]):
@@ -20,6 +24,22 @@ locals {
   )
   ssl_key_filename  = var.ssl_key  == "" ? "" : basename(var.ssl_key)
   ssl_cert_filename = var.ssl_cert == "" ? "" : basename(var.ssl_cert)
+}
+
+resource "aws_s3_bucket_object" "cam-credentials-file" {
+  count = length(local.instance_info_list) == 0 ? 0 : 1
+
+  bucket = var.bucket_name
+  key    = local.cam_credentials_file
+  source = var.cam_credentials_file
+}
+
+resource "aws_s3_bucket_object" "cac-cam-script" {
+  count = length(local.instance_info_list) == 0 ? 0 : 1
+
+  bucket = var.bucket_name
+  key    = local.cam_script
+  source = "${path.module}/cac-cam.py"
 }
 
 resource "aws_s3_bucket_object" "ssl-key" {
@@ -55,7 +75,8 @@ resource "aws_s3_bucket_object" "cac-startup-script" {
       customer_master_key_id   = var.customer_master_key_id,
       cam_url                  = var.cam_url,
       cac_installer_url        = var.cac_installer_url,
-      cac_token                = var.cac_token,
+      cam_credentials_file     = local.cam_credentials_file,
+      cam_script               = local.cam_script,
       pcoip_registration_code  = var.pcoip_registration_code,
 
       domain_controller_ip        = var.domain_controller_ip,
