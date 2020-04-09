@@ -16,24 +16,52 @@ log() {
     echo "[$(date)] $${message}" | tee -a "$INSTALL_LOG"
 }
 
+install_prereqs() {
+    log "--> Installing awscli and Python 3..."
+    apt-get -qq update
+    apt install -y python3
+    apt install -y awscli
+}
+
 get_credentials() {
+    log "--> Downloading CAM credentials JSON file from the bucket..."
+    aws s3 cp s3://${bucket_name}/${cam_credentials_file} $INSTALL_DIR
+
     if [[ -z "${customer_master_key_id}" ]]; then
         log "Not using encryption"
 
         PCOIP_REGISTRATION_CODE=${pcoip_registration_code}
         AD_SERVICE_ACCOUNT_PASSWORD=${ad_service_account_password}
-        CAC_TOKEN=${cac_token}
 
     else
         log "Using encryption key ${customer_master_key_id}"
 
-        apt install -y awscli
-
         PCOIP_REGISTRATION_CODE=$(aws kms decrypt --region ${aws_region} --ciphertext-blob fileb://<(echo "${pcoip_registration_code}" | base64 -d) --output text --query Plaintext | base64 -d)
         AD_SERVICE_ACCOUNT_PASSWORD=$(aws kms decrypt --region ${aws_region} --ciphertext-blob fileb://<(echo "${ad_service_account_password}" | base64 -d) --output text --query Plaintext | base64 -d)
-        CAC_TOKEN=$(aws kms decrypt --region ${aws_region} --ciphertext-blob fileb://<(echo "${cac_token}" | base64 -d) --output text --query Plaintext | base64 -d)
+        cam_cred_encrypted=$(cat ${cam_credentials_file})
+        CAM_CREDENTIALS=$(aws kms decrypt --region ${aws_region} --ciphertext-blob fileb://<(echo "$cam_cred_encrypted" | base64 -d) --output text --query Plaintext | base64 -d)
+        echo $CAM_CREDENTIALS | tee ${cam_credentials_file}
     fi
+}
 
+get_cac_token() {
+    log "--> Retrieving connector token before CAC install..."
+
+    log "--> Downloading CAM python script from the bucket..."
+    aws s3 cp s3://${bucket_name}/${cam_script} $INSTALL_DIR
+    chmod +x ${cam_script}
+
+    # Set CAC_TOKEN variable using the script's output
+    CAC_TOKEN=`./${cam_script} ${cam_credentials_file}`
+
+    # Check and exit startup script if retrieving connector token failed
+    if [ $? -ne 0 ]; then
+        log "--> ERROR: Failed to retrieve connector token using CAM script. Exiting startup script..."
+        exit 1
+    fi
+}
+
+check_required_vars() {
     # Exit if any of the required variables are missing
     if [[ -z "$PCOIP_REGISTRATION_CODE" || -z "$AD_SERVICE_ACCOUNT_PASSWORD" || -z "$CAC_TOKEN" ]]; then
         log "Missing required parameters:"
@@ -49,7 +77,20 @@ if [[ -f "$INSTALL_DIR/cloud-access-connector" ]]; then
     exit 0
 fi
 
+if [[ ! -f "$LOG_FILE" ]]
+then
+    mkdir -p "$(dirname $${LOG_FILE})"
+    touch "$LOG_FILE"
+    chmod +644 "$LOG_FILE"
+fi
+
+install_prereqs
+
 get_credentials
+
+get_cac_token
+
+check_required_vars
 
 # Network tuning
 PCOIP_NETWORK_CONF_FILE="/etc/sysctl.d/01-pcoip-cac-network.conf"
