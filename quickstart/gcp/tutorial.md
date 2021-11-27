@@ -20,7 +20,7 @@ gcloud config set project <project_id>
 
 Run the following command in Cloud Shell
 ```bash
-cd quickstart
+cd quickstart/gcp
 ./gcp-cloudshell-quickstart.py
 ```
 and you will be prompted to enter each parameter. After you answer all the prompts, the script will continue to create the deployment.
